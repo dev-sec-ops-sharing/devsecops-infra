@@ -53,13 +53,17 @@ jobs:
 
             // Clean up old bot inline review comments to prevent duplicates
             try {
+              console.log("PR Number:", context.issue.number);
               const oldComments = await github.rest.pulls.listReviewComments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: context.issue.number,
               });
+              console.log(`Found ${oldComments.data.length} review comments.`);
               for (const comment of oldComments.data) {
+                console.log(`Comment ID: ${comment.id}, Author: ${comment.user?.login}`);
                 if (comment.user && comment.user.login && comment.user.login.includes('github-actions')) {
+                  console.log(`Deleting review comment ${comment.id}`);
                   await github.rest.pulls.deleteReviewComment({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
@@ -74,8 +78,10 @@ jobs:
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
               });
+              console.log(`Found ${oldIssueComments.data.length} issue comments.`);
               for (const comment of oldIssueComments.data) {
                 if (comment.user && comment.user.login && comment.user.login.includes('github-actions') && comment.body.includes('🤖 AI Code Review')) {
+                  console.log(`Deleting issue comment ${comment.id}`);
                   await github.rest.issues.deleteComment({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
@@ -86,6 +92,13 @@ jobs:
               console.log("Cleaned up old bot review comments.");
             } catch (err) {
               console.error("Failed to clean up old comments:", err);
+              // Post the error message as a PR comment so we can see it!
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `⚠️ **AI Review Cleanup Error:**\n\`\`\`\n${err.stack || err.message || err}\n\`\`\``
+              });
             }
             
             const prompt = `Review this code diff for security issues, bugs, and best practices. 

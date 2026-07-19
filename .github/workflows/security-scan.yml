@@ -49,7 +49,14 @@ jobs:
           gitleaks version
 
       - name: Run Gitleaks Scan
-        run: gitleaks detect --source=. --verbose --redact
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Scanning commits in PR: origin/${{ github.base_ref }}..HEAD"
+            gitleaks detect --source=. --log-opts="origin/${{ github.base_ref }}..HEAD" --verbose --redact
+          else
+            echo "Scanning last commit"
+            gitleaks detect --source=. --log-opts="HEAD~1..HEAD" --verbose --redact
+          fi
 
   sonarcloud:
     name: 🔍 SAST + SCA

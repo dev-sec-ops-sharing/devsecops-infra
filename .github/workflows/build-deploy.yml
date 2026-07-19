@@ -1,0 +1,169 @@
+name: Build & Deploy
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        required: true
+        type: string
+      region:
+        required: false
+        type: string
+        default: 'us-central1'
+      dockerfile-path:
+        required: false
+        type: string
+        default: './Dockerfile'
+      env-vars:
+        required: false
+        type: string
+        default: ''
+      environment:
+        required: false
+        type: string
+        default: ''
+      secrets:
+        required: false
+        type: string
+        default: ''
+      allow-unauthenticated:
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      GCP_SERVICE_ACCOUNT:
+        required: true
+      GCP_PROJECT_ID:
+        required: true
+      GOOGLE_CHAT_WEBHOOK:
+        required: false
+    outputs:
+      service-url:
+        description: "The URL of the deployed service"
+        value: ${{ jobs.build-scan-deploy.outputs.service-url }}
+
+permissions:
+  contents: read
+  security-events: write
+  id-token: write
+
+env:
+  GAR_REGISTRY: ${{ inputs.region }}-docker.pkg.dev
+  IMAGE: ${{ inputs.region }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/demo-registry/${{ inputs.service-name }}
+
+jobs:
+  build-scan-deploy:
+    name: 🏗️ Build, Scan & Deploy
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      service-url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Auth GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Configure Docker for GAR
+        run: gcloud auth configure-docker ${{ env.GAR_REGISTRY }} --quiet
+
+      - name: Build Docker Image
+        id: build-image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ inputs.dockerfile-path }}
+          push: false
+          load: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }},${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 🛡️ Trivy Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.IMAGE }}:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+          category: 'trivy-image'
+
+      - name: Push Image to GAR
+        run: docker push ${{ env.IMAGE }} --all-tags
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ inputs.service-name }}
+          region: ${{ inputs.region }}
+          image: ${{ env.IMAGE }}:${{ github.sha }}
+          flags: |
+            --revision-suffix=${{ github.sha }}
+            --max-instances=2
+            --memory=512Mi
+            --cpu=1
+            ${{ inputs.allow-unauthenticated == true && '--allow-unauthenticated' || '--no-allow-unauthenticated' }}
+            ${{ inputs.env-vars != '' && format('--set-env-vars={0}', inputs.env-vars) || '' }}
+            ${{ inputs.secrets != '' && format('--set-secrets={0}', inputs.secrets) || '' }}
+
+      - name: 🏥 Health Check
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ inputs.service-name }} \
+            --region=${{ inputs.region }} \
+            --format='value(status.url)')
+          echo "Service URL: $SERVICE_URL"
+          
+          # Wait for healthy response
+          for i in {1..10}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$SERVICE_URL/health" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Health check passed!"
+              exit 0
+            fi
+            echo "Attempt $i: status=$STATUS, retrying in 5s..."
+            sleep 5
+          done
+          
+          echo "❌ Health check failed — rolling back"
+          gcloud run services update-traffic ${{ inputs.service-name }} \
+            --region=${{ inputs.region }} \
+            --to-revisions=LATEST=0
+          exit 1
+
+      - name: 🔔 Google Chat Notification
+        if: always()
+        run: |
+          if [ -n "${{ secrets.GOOGLE_CHAT_WEBHOOK }}" ]; then
+            STATUS="SUCCESS"
+            EMOJI="🚀"
+            if [ "${{ job.status }}" = "failure" ]; then
+              STATUS="FAILED"
+              EMOJI="❌"
+            fi
+            
+            curl -X POST -H 'Content-Type: application/json' \
+              "${{ secrets.GOOGLE_CHAT_WEBHOOK }}" \
+              -d "{\"text\": \"$EMOJI *Pipeline:* Build & Deploy\n*Service:* ${{ inputs.service-name }}\n*Status:* $STATUS\n*Commit:* ${{ github.sha }}\n*Branch:* ${{ github.ref_name }}\"}"
+          else
+            echo "GOOGLE_CHAT_WEBHOOK is not set. Skipping."
+          fi

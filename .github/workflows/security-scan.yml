@@ -1,0 +1,132 @@
+name: Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      sonar-project-key:
+        required: true
+        type: string
+      sonar-organization:
+        required: true
+        type: string
+      test-cmd:
+        required: false
+        type: string
+        default: ''
+      coverage-artifact:
+        required: false
+        type: string
+        default: ''
+      scan-image:
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      SONAR_TOKEN:
+        required: true
+      GOOGLE_CHAT_WEBHOOK:
+        required: false
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  gitleaks:
+    name: 🔐 Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sonarcloud:
+    name: 🔍 SAST + SCA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Tests with Coverage (if configured)
+        if: inputs.test-cmd != ''
+        run: ${{ inputs.test-cmd }}
+
+      - name: Download Coverage Artifact
+        if: inputs.coverage-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.coverage-artifact }}
+          path: coverage/
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ inputs.sonar-project-key }}
+            -Dsonar.organization=${{ inputs.sonar-organization }}
+            -Dsonar.qualitygate.wait=true
+
+  trivy-iac:
+    name: 🏗️ IaC Misconfiguration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy IaC Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          scanners: 'misconfig,vuln'
+          format: 'sarif'
+          output: 'trivy-iac-results.sarif'
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-iac-results.sarif'
+          category: 'trivy-iac'
+
+  notify:
+    name: 🔔 Google Chat Notification
+    runs-on: ubuntu-latest
+    needs: [gitleaks, sonarcloud, trivy-iac]
+    if: always()
+    steps:
+      - name: Send Notification
+        run: |
+          if [ -n "${{ secrets.GOOGLE_CHAT_WEBHOOK }}" ]; then
+            STATUS="SUCCESS"
+            if [ "${{ needs.gitleaks.result }}" != "success" ] || [ "${{ needs.sonarcloud.result }}" != "success" ] || [ "${{ needs.trivy-iac.result }}" != "success" ]; then
+              STATUS="FAILED"
+            fi
+            
+            EMOJI="✅"
+            if [ "$STATUS" = "FAILED" ]; then
+              EMOJI="❌"
+            fi
+            
+            curl -X POST -H 'Content-Type: application/json' \
+              "${{ secrets.GOOGLE_CHAT_WEBHOOK }}" \
+              -d "{\"text\": \"$EMOJI *Pipeline:* Security Scan\n*Project:* ${{ inputs.sonar-project-key }}\n*Status:* $STATUS\n*Commit:* ${{ github.sha }}\n*Branch:* ${{ github.ref_name }}\"}"
+          else
+            echo "GOOGLE_CHAT_WEBHOOK is not set. Skipping."
+          fi

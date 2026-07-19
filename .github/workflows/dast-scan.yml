@@ -1,0 +1,57 @@
+name: DAST Scan
+
+on:
+  workflow_call:
+    inputs:
+      target-url:
+        required: true
+        type: string
+    secrets:
+      GOOGLE_CHAT_WEBHOOK:
+        required: false
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  zap-scan:
+    name: 🌐 ZAP DAST Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ inputs.target-url }}
+          cmd_options: '-a -J report.json'
+
+      - name: Convert ZAP JSON to SARIF
+        uses: SvanBoxel/zaproxy-to-ghas@main
+        if: always()
+
+      - name: Upload ZAP SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'results.sarif'
+          category: 'zap-dast'
+
+      - name: 🔔 Google Chat Notification
+        if: always()
+        run: |
+          if [ -n "${{ secrets.GOOGLE_CHAT_WEBHOOK }}" ]; then
+            STATUS="SUCCESS"
+            EMOJI="🌐"
+            if [ "${{ job.status }}" = "failure" ]; then
+              STATUS="FAILED"
+              EMOJI="❌"
+            fi
+            
+            curl -X POST -H 'Content-Type: application/json' \
+              "${{ secrets.GOOGLE_CHAT_WEBHOOK }}" \
+              -d "{\"text\": \"$EMOJI *Pipeline:* DAST Scan\n*Target:* ${{ inputs.target-url }}\n*Status:* $STATUS\n*Commit:* ${{ github.sha }}\n*Branch:* ${{ github.ref_name }}\"}"
+          else
+            echo "GOOGLE_CHAT_WEBHOOK is not set. Skipping."
+          fi

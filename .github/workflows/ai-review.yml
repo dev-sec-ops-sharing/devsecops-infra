@@ -59,7 +59,7 @@ jobs:
                 pull_number: context.issue.number,
               });
               for (const comment of oldComments.data) {
-                if (comment.user.login === 'github-actions[bot]') {
+                if (comment.user && comment.user.login && comment.user.login.includes('github-actions')) {
                   await github.rest.pulls.deleteReviewComment({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
@@ -75,7 +75,7 @@ jobs:
                 issue_number: context.issue.number,
               });
               for (const comment of oldIssueComments.data) {
-                if (comment.user.login === 'github-actions[bot]' && comment.body.includes('🤖 AI Code Review')) {
+                if (comment.user && comment.user.login && comment.user.login.includes('github-actions') && comment.body.includes('🤖 AI Code Review')) {
                   await github.rest.issues.deleteComment({
                     owner: context.repo.owner,
                     repo: context.repo.repo,

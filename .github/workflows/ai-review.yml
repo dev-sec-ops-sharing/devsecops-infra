@@ -32,7 +32,7 @@ jobs:
             fs.writeFileSync('diff.txt', filtered.map(p => 'diff --git ' + p).join(''));
           "
           echo "diff<<EOF" >> $GITHUB_OUTPUT
-          head -c 10000 diff.txt >> $GITHUB_OUTPUT
+          head -n 300 diff.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -72,6 +72,11 @@ jobs:
                     text: `${prompt}\n\nCode Diff:\n${diff}`
                   }]
                 }],
+                systemInstruction: {
+                  parts: [{
+                    text: "You are a Senior DevSecOps Engineer. Your task is to perform an automated code review on the provided pull request git diff. Analyze the code strictly for security vulnerabilities (e.g., OWASP Top 10, SQL Injection, XSS, hardcoded secrets, authentication flaws), logical bugs, performance bottlenecks, and code quality issues. Be constructive, concise, and professional."
+                  }]
+                },
                 generationConfig: {
                   responseMimeType: "application/json"
                 }

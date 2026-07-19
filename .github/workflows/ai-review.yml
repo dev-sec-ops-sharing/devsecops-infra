@@ -41,9 +41,10 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const diff = process.env.PR_DIFF;
+            const fs = require('fs');
+            const diff = fs.existsSync('diff.txt') ? fs.readFileSync('diff.txt', 'utf8') : '';
             if (!diff) {
-              console.log("No diff found or PR_DIFF is empty.");
+              console.log("No diff found or diff.txt is empty.");
               return;
             }
                         if (!process.env.GEMINI_API_KEY) {
@@ -180,4 +181,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          PR_DIFF: ${{ steps.diff.outputs.diff }}

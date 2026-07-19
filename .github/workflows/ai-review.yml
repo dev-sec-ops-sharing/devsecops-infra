@@ -46,9 +46,46 @@ jobs:
               console.log("No diff found or PR_DIFF is empty.");
               return;
             }
-            if (!process.env.GEMINI_API_KEY) {
+                        if (!process.env.GEMINI_API_KEY) {
               console.log("GEMINI_API_KEY is not set. Skipping AI review.");
               return;
+            }
+
+            // Clean up old bot inline review comments to prevent duplicates
+            try {
+              const oldComments = await github.rest.pulls.listReviewComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+              });
+              for (const comment of oldComments.data) {
+                if (comment.user.login === 'github-actions[bot]') {
+                  await github.rest.pulls.deleteReviewComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: comment.id,
+                  });
+                }
+              }
+              
+              // Clean up old bot conversation comments
+              const oldIssueComments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+              for (const comment of oldIssueComments.data) {
+                if (comment.user.login === 'github-actions[bot]' && comment.body.includes('🤖 AI Code Review')) {
+                  await github.rest.issues.deleteComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: comment.id,
+                  });
+                }
+              }
+              console.log("Cleaned up old bot review comments.");
+            } catch (err) {
+              console.error("Failed to clean up old comments:", err);
             }
             
             const prompt = `Review this code diff for security issues, bugs, and best practices. 

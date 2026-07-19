@@ -18,9 +18,21 @@ jobs:
       - name: Get PR diff
         id: diff
         run: |
-          gh pr diff ${{ github.event.pull_request.number }} > diff.txt
+          gh pr diff ${{ github.event.pull_request.number }} > raw_diff.txt
+          node -e "
+            const fs = require('fs');
+            const content = fs.readFileSync('raw_diff.txt', 'utf8');
+            const parts = content.split('diff --git ');
+            const filtered = parts.filter(p => {
+              if (!p.trim()) return false;
+              const path = p.split(' ')[0];
+              const exclude = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.png', '.jpg', '.jpeg', '.svg', '.gif', '.ico'];
+              return !exclude.some(x => path.includes(x));
+            });
+            fs.writeFileSync('diff.txt', filtered.map(p => 'diff --git ' + p).join(''));
+          "
           echo "diff<<EOF" >> $GITHUB_OUTPUT
-          head -c 5000 diff.txt >> $GITHUB_OUTPUT
+          head -c 10000 diff.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

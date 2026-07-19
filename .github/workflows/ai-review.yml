@@ -32,7 +32,7 @@ jobs:
             fs.writeFileSync('diff.txt', filtered.map(p => 'diff --git ' + p).join(''));
           "
           echo "diff<<EOF" >> $GITHUB_OUTPUT
-          head -n 300 diff.txt >> $GITHUB_OUTPUT
+          head -n 500 diff.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

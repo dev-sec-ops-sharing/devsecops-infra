@@ -39,6 +39,8 @@ on:
         required: true
       GOOGLE_CHAT_WEBHOOK:
         required: false
+      API_URL:
+        required: false
     outputs:
       service-url:
         description: "The URL of the deployed service"
@@ -124,6 +126,7 @@ jobs:
             --cpu=1
             ${{ inputs.allow-unauthenticated == true && '--allow-unauthenticated' || '--no-allow-unauthenticated' }}
             ${{ inputs.env-vars != '' && format('--set-env-vars={0}', inputs.env-vars) || '' }}
+            ${{ secrets.API_URL != '' && format('--set-env-vars=API_URL={0}', secrets.API_URL) || '' }}
             ${{ inputs.secrets != '' && format('--set-secrets={0}', inputs.secrets) || '' }}
 
       - name: 🏥 Health Check

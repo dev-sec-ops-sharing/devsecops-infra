@@ -22,13 +22,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.15.0
+      - name: 🌐 Run ZAP Baseline Scan (Docker)
+        run: |
+          docker run --rm -v $(pwd):/zap/wrk/:rw ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+            -t "${{ inputs.target-url }}" \
+            -r report_html.html \
+            -J report_json.json \
+            -a || true
+
+      - name: 📦 Upload ZAP Reports
+        uses: actions/upload-artifact@v4
+        if: always()
         with:
-          target: ${{ inputs.target-url }}
-          token: ${{ github.token }}
-          issue_title: '🚨 DAST Security Vulnerabilities (ZAP)'
-          cmd_options: '-a'
+          name: zap-dast-report
+          path: |
+            report_html.html
+            report_json.json
 
       - name: 🔔 Google Chat Notification
         if: always()

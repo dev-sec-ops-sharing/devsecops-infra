@@ -2,6 +2,75 @@ const fs = require('node:fs');
 const github = require('@actions/github');
 const core = require('@actions/core');
 
+async function cleanUpOldComments(octokit, context, prNumber) {
+  try {
+    console.log("PR Number:", prNumber);
+    const oldComments = await octokit.rest.pulls.listReviewComments({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      pull_number: prNumber,
+    });
+    console.log(`Found ${oldComments.data.length} review comments.`);
+    for (const comment of oldComments.data) {
+      if (comment.user?.login?.includes('github-actions')) {
+        console.log(`Deleting review comment ${comment.id}`);
+        await octokit.rest.pulls.deleteReviewComment({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          comment_id: comment.id,
+        });
+      }
+    }
+    
+    // Clean up old bot conversation comments
+    const oldIssueComments = await octokit.rest.issues.listComments({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      issue_number: prNumber,
+    });
+    console.log(`Found ${oldIssueComments.data.length} issue comments.`);
+    for (const comment of oldIssueComments.data) {
+      if (comment.user?.login?.includes('github-actions') && comment.body?.includes('🤖 AI Code Review')) {
+        console.log(`Deleting issue comment ${comment.id}`);
+        await octokit.rest.issues.deleteComment({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          comment_id: comment.id,
+        });
+      }
+    }
+    console.log("Cleaned up old bot review comments.");
+  } catch (err) {
+    console.error("Failed to clean up old comments:", err);
+  }
+}
+
+async function postReview(octokit, context, prNumber, comments) {
+  try {
+    await octokit.rest.pulls.createReview({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      pull_number: prNumber,
+      event: 'COMMENT',
+      comments: comments.map(c => ({
+        path: c.path,
+        line: Number.parseInt(c.line, 10),
+        body: c.body
+      }))
+    });
+    console.log(`Successfully posted ${comments.length} inline review comments.`);
+  } catch (apiError) {
+    console.error("Failed to post inline review comments via GitHub API:", apiError);
+    const markdownBody = comments.map(c => `### 📄 File: \`${c.path}\` (Line ${c.line})\n${c.body}`).join('\n\n');
+    await octokit.rest.issues.createComment({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      issue_number: prNumber,
+      body: `## 🤖 AI Code Review (Gemini)\n\n${markdownBody}`
+    });
+  }
+}
+
 async function run() {
   try {
     const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -31,47 +100,7 @@ async function run() {
       return;
     }
 
-    // Clean up old bot inline review comments to prevent duplicates
-    try {
-      console.log("PR Number:", prNumber);
-      const oldComments = await octokit.rest.pulls.listReviewComments({
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-        pull_number: prNumber,
-      });
-      console.log(`Found ${oldComments.data.length} review comments.`);
-      for (const comment of oldComments.data) {
-        if (comment.user?.login?.includes('github-actions')) {
-          console.log(`Deleting review comment ${comment.id}`);
-          await octokit.rest.pulls.deleteReviewComment({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            comment_id: comment.id,
-          });
-        }
-      }
-      
-      // Clean up old bot conversation comments
-      const oldIssueComments = await octokit.rest.issues.listComments({
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-        issue_number: prNumber,
-      });
-      console.log(`Found ${oldIssueComments.data.length} issue comments.`);
-      for (const comment of oldIssueComments.data) {
-        if (comment.user?.login?.includes('github-actions') && comment.body?.includes('🤖 AI Code Review')) {
-          console.log(`Deleting issue comment ${comment.id}`);
-          await octokit.rest.issues.deleteComment({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            comment_id: comment.id,
-          });
-        }
-      }
-      console.log("Cleaned up old bot review comments.");
-    } catch (err) {
-      console.error("Failed to clean up old comments:", err);
-    }
+    await cleanUpOldComments(octokit, context, prNumber);
 
     const prompt = `Review this code diff for security issues, bugs, and best practices. 
     You must analyze the diff and return a JSON array of review comments.
@@ -133,29 +162,7 @@ async function run() {
       return;
     }
 
-    try {
-      await octokit.rest.pulls.createReview({
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-        pull_number: prNumber,
-        event: 'COMMENT',
-        comments: comments.map(c => ({
-          path: c.path,
-          line: Number.parseInt(c.line, 10),
-          body: c.body
-        }))
-      });
-      console.log(`Successfully posted ${comments.length} inline review comments.`);
-    } catch (apiError) {
-      console.error("Failed to post inline review comments via GitHub API:", apiError);
-      const markdownBody = comments.map(c => `### 📄 File: \`${c.path}\` (Line ${c.line})\n${c.body}`).join('\n\n');
-      await octokit.rest.issues.createComment({
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-        issue_number: prNumber,
-        body: `## 🤖 AI Code Review (Gemini)\n\n${markdownBody}`
-      });
-    }
+    await postReview(octokit, context, prNumber, comments);
   } catch (error) {
     core.setFailed(error.message);
   }

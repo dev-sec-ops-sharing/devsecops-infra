@@ -87,7 +87,7 @@ jobs:
           file: ${{ inputs.dockerfile-path }}
           push: false
           load: true
-          tags: ${{ env.IMAGE }}:${{ github.sha }},${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ github.ref_name }}
+          tags: ${{ env.IMAGE }}:${{ github.sha }},${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

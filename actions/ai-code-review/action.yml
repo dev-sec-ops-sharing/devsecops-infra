@@ -12,9 +12,7 @@ runs:
   steps:
     - name: Install dependencies
       shell: bash
-      run: |
-        cd ${{ github.action_path }}
-        npm install @actions/github @actions/core
+      run: npm install --prefix ${{ github.action_path }}
 
     - name: Run Review Script
       shell: bash

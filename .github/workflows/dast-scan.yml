@@ -25,7 +25,7 @@ jobs:
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: ${{ inputs.target-url }}
-          cmd_options: '-a -J report.json'
+          cmd_options: '-a'
 
       - name: Convert ZAP JSON to SARIF
         uses: SvanBoxel/zaproxy-to-ghas@main

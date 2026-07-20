@@ -27,16 +27,15 @@ jobs:
           target: ${{ inputs.target-url }}
           cmd_options: '-a'
 
-      - name: Convert ZAP JSON to SARIF
-        uses: SvanBoxel/zaproxy-to-ghas@main
-        if: always()
-
-      - name: Upload ZAP SARIF
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload ZAP Reports
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          sarif_file: 'results.sarif'
-          category: 'zap-dast'
+          name: zap-scan-reports
+          path: |
+            report_html.html
+            report_json.json
+            report_md.md
 
       - name: 🔔 Google Chat Notification
         if: always()

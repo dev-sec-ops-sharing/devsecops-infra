@@ -18,7 +18,7 @@ runs:
 
     - name: Run Review Script
       shell: bash
-      run: node ${{ github.action_path }}/ai-review.js
+      run: node ${{ github.action_path }}/ai-review.mjs
       env:
         GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
         GITHUB_TOKEN: ${{ inputs.github-token }}

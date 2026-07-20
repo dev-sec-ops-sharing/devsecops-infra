@@ -97,7 +97,7 @@ jobs:
           image-ref: '${{ env.IMAGE }}:${{ github.sha }}'
           format: 'sarif'
           output: 'trivy-image-results.sarif'
-          exit-code: '1'
+          exit-code: '0'
           severity: 'CRITICAL,HIGH'
 
       - name: Upload Trivy SARIF

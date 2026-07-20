@@ -1,0 +1,24 @@
+name: 'AI Code Review'
+description: 'Runs AI Code Review on a PR diff using Gemini API'
+inputs:
+  gemini-api-key:
+    description: 'Gemini API Key'
+    required: true
+  github-token:
+    description: 'GitHub Token'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: |
+        cd ${{ github.action_path }}
+        npm install @actions/github @actions/core
+
+    - name: Run Review Script
+      shell: bash
+      run: node ${{ github.action_path }}/ai-review.js
+      env:
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}

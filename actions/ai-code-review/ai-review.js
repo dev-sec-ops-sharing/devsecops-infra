@@ -1,0 +1,164 @@
+const fs = require('node:fs');
+const github = require('@actions/github');
+const core = require('@actions/core');
+
+async function run() {
+  try {
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const githubToken = process.env.GITHUB_TOKEN;
+
+    if (!geminiApiKey) {
+      console.log("GEMINI_API_KEY is not set. Skipping AI review.");
+      return;
+    }
+    if (!githubToken) {
+      console.log("GITHUB_TOKEN is not set. Skipping AI review.");
+      return;
+    }
+
+    const octokit = github.getOctokit(githubToken);
+    const context = github.context;
+    const prNumber = context.payload.pull_request?.number || null;
+
+    if (!prNumber) {
+      console.log("Not a pull request. Skipping AI review.");
+      return;
+    }
+
+    const diff = fs.existsSync('diff.txt') ? fs.readFileSync('diff.txt', 'utf8') : '';
+    if (!diff) {
+      console.log("No diff found or diff.txt is empty.");
+      return;
+    }
+
+    // Clean up old bot inline review comments to prevent duplicates
+    try {
+      console.log("PR Number:", prNumber);
+      const oldComments = await octokit.rest.pulls.listReviewComments({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        pull_number: prNumber,
+      });
+      console.log(`Found ${oldComments.data.length} review comments.`);
+      for (const comment of oldComments.data) {
+        if (comment.user?.login?.includes('github-actions')) {
+          console.log(`Deleting review comment ${comment.id}`);
+          await octokit.rest.pulls.deleteReviewComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            comment_id: comment.id,
+          });
+        }
+      }
+      
+      // Clean up old bot conversation comments
+      const oldIssueComments = await octokit.rest.issues.listComments({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: prNumber,
+      });
+      console.log(`Found ${oldIssueComments.data.length} issue comments.`);
+      for (const comment of oldIssueComments.data) {
+        if (comment.user?.login?.includes('github-actions') && comment.body?.includes('🤖 AI Code Review')) {
+          console.log(`Deleting issue comment ${comment.id}`);
+          await octokit.rest.issues.deleteComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            comment_id: comment.id,
+          });
+        }
+      }
+      console.log("Cleaned up old bot review comments.");
+    } catch (err) {
+      console.error("Failed to clean up old comments:", err);
+    }
+
+    const prompt = `Review this code diff for security issues, bugs, and best practices. 
+    You must analyze the diff and return a JSON array of review comments.
+    Each comment object in the array must contain:
+    - 'path': (string) the relative file path where the issue occurs (e.g. 'src/transaction.controller.ts')
+    - 'line': (integer) the line number in the new/modified file where the issue is found (refer to the lines starting with '+' in the diff)
+    - 'body': (string) the review comment explaining the issue and how to fix it, formatted in markdown.
+
+    If no issues are found, return an empty array [].
+    Do not include any other text, explanations, or code blocks outside the JSON array.`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiApiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: `${prompt}\n\nCode Diff:\n${diff}`
+          }]
+        }],
+        systemInstruction: {
+          parts: [{
+            text: "You are a Senior DevSecOps Engineer. Your task is to perform an automated code review on the provided pull request git diff. Analyze the code strictly for security vulnerabilities (e.g., OWASP Top 10, SQL Injection, XSS, hardcoded secrets, authentication flaws), logical bugs, performance bottlenecks, and code quality issues. Be constructive, concise, and professional."
+          }]
+        },
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
+      })
+    });
+
+    const result = await response.json();
+    if (!result.candidates || result.candidates.length === 0) {
+      console.log("No response from Gemini.");
+      return;
+    }
+
+    const textResponse = result.candidates[0].content.parts[0].text;
+    console.log("Gemini Response:", textResponse);
+
+    let comments = [];
+    try {
+      comments = JSON.parse(textResponse);
+    } catch (e) {
+      console.error("Failed to parse Gemini response as JSON:", e);
+      await octokit.rest.issues.createComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: prNumber,
+        body: `## 🤖 AI Code Review (Gemini)\n\n${textResponse}`
+      });
+      return;
+    }
+
+    if (!Array.isArray(comments) || comments.length === 0) {
+      console.log("No code review comments generated by AI.");
+      return;
+    }
+
+    try {
+      await octokit.rest.pulls.createReview({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        pull_number: prNumber,
+        event: 'COMMENT',
+        comments: comments.map(c => ({
+          path: c.path,
+          line: Number.parseInt(c.line, 10),
+          body: c.body
+        }))
+      });
+      console.log(`Successfully posted ${comments.length} inline review comments.`);
+    } catch (apiError) {
+      console.error("Failed to post inline review comments via GitHub API:", apiError);
+      const markdownBody = comments.map(c => `### 📄 File: \`${c.path}\` (Line ${c.line})\n${c.body}`).join('\n\n');
+      await octokit.rest.issues.createComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: prNumber,
+        body: `## 🤖 AI Code Review (Gemini)\n\n${markdownBody}`
+      });
+    }
+  } catch (error) {
+    core.setFailed(error.message);
+  }
+}
+
+run();

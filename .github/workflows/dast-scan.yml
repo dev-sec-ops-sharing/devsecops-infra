@@ -24,6 +24,7 @@ jobs:
 
       - name: 🌐 Run ZAP Baseline Scan (Docker)
         run: |
+          sudo chmod -R 777 .
           docker run --rm -v $(pwd):/zap/wrk/:rw ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t "${{ inputs.target-url }}" \
             -r report_html.html \

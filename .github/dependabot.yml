@@ -4,8 +4,7 @@ updates:
   - package-ecosystem: "npm"
     directory: "/actions/ai-code-review"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 3
     labels:
       - "dependencies"
@@ -15,8 +14,7 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 3
     labels:
       - "dependencies"

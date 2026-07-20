@@ -1,6 +1,5 @@
 version: 2
 updates:
-  # Tự động cập nhật các thư viện npm trong Custom Action (ai-code-review)
   - package-ecosystem: "npm"
     directory: "/actions/ai-code-review"
     schedule:
@@ -10,7 +9,6 @@ updates:
       - "dependencies"
       - "automated"
 
-  # Tự động cập nhật phiên bản của các GitHub Actions được sử dụng trong các workflow
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
